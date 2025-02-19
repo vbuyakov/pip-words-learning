@@ -1,4 +1,5 @@
 # words.py
+LIST_NAME = "electrical_terms"
 
 terms = {
     "Электричество": "l'électricité",
