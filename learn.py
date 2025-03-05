@@ -73,7 +73,7 @@ def start_quiz(reverse=False):
         for russian_term in learning_set[:]:
             french_term = terms[russian_term]
             question, answer = (french_term, russian_term) if reverse else (russian_term, french_term)
-            user_answer = input(f"Traduisez : '{question}'\nVotre réponse : ").strip()
+            user_answer = input(f"Traduisez : '{Fore.CYAN + question + Style.RESET_ALL}'\nVotre réponse : ").strip()
 
             if user_answer.lower() == answer.lower():
                 print(Fore.GREEN + "Correct !" + Style.RESET_ALL)

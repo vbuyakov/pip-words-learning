@@ -1,3 +1,5 @@
 __pycache__
 progress.json
 firebase_credentials.json
+.vscode
+.idea
