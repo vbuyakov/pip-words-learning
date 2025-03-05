@@ -5,7 +5,7 @@ import os
 import firebase_admin
 from firebase_admin import credentials, firestore
 from colorama import Fore, Style
-from words import terms, LIST_NAME
+from words.words import terms, LIST_NAME
 
 PROGRESS_FILE = "progress.json"
 LEARNING_SET_SIZE = 10
