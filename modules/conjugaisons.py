@@ -9,8 +9,9 @@ from modules.openai import fetch_conjugation
 
 
 # Constants
-CORRECT_REQUIRED = 3  # Number of correct answers required to mark as learned
-ACTIVE_WORDS = 20  # Number of active words in learning queue
+CORRECT_REQUIRED = 2  # Number of correct answers required to mark as learned
+ACTIVE_WORDS = 10  # Number of active words in learning queue
+DONT_REPEAT_LEN = 3 
 
 INBOUND_PATH = "inbound/"
 
@@ -38,9 +39,11 @@ def setup():
     conn.close()
 
 
-def show_help(correct_conjugation):
+def show_word_hint(correct_conjugation):
     masked_conjugation = correct_conjugation[0] + "_" * (len(correct_conjugation) - 2) + correct_conjugation[-1]
     print(f"Hint: {masked_conjugation}")
+def show_help(): 
+    print(f"-------- \n {Fore.MAGENTA}/q{Style.RESET_ALL} or {Fore.MAGENTA}!q{Style.RESET_ALL} - Sortir de app \n {Fore.MAGENTA}/mh{Style.RESET_ALL} or {Fore.MAGENTA}!mh{Style.RESET_ALL} - Aidez moi \n -------- ")
 
 def import_verbs():
     """Reads verbs from inbound folder and stores conjugations."""
@@ -79,8 +82,9 @@ def import_verbs():
 # Update progress and manage learning queue
 def update_progress(verb, tense, pronoun, score):
     """Updates progress in SQLite and Firebase, resetting on mistakes."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, autocommit=True)
     cursor = conn.cursor()
+    
     
     current = cursor.execute("SELECT correct_count FROM conjugations WHERE verb=? AND tense=? AND pronoun=?", (verb, tense, pronoun)).fetchone()
     
@@ -95,38 +99,48 @@ def update_progress(verb, tense, pronoun, score):
     print(f"NEW CORRECT{correct_count}")    
     
     cursor.execute("UPDATE conjugations SET correct_count=? WHERE verb=? AND tense=? AND pronoun=?", (correct_count, verb, tense, pronoun))
-    conn.commit()
     conn.close()
-    
-    # doc_ref = db.collection("progress").document(f"{verb}-{tense}-{pronoun}")
-    # doc_ref.set({
-    #     "verb": verb,
-    #     "tense": tense,
-    #     "pronoun": pronoun,
-    #     "correct_count": correct_count,
-    #     "last_update": datetime.now().isoformat()
-    # }, merge=True)
+    return correct_count
 
-def get_active_words(tense):
+def get_active_words(tense, words_count= ACTIVE_WORDS):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    cursor.row_factory = lambda cursor, row: list(row)
     
     if tense == "Mixed":
         words = cursor.execute("""
-            SELECT verb, tense, pronoun FROM conjugations
+            SELECT verb, tense, pronoun, conjugation, translation_ru, correct_count FROM conjugations
             WHERE correct_count < ?
-            ORDER BY last_update , RANDOM()
+            ORDER BY  RANDOM()
             LIMIT ?
-        """, (CORRECT_REQUIRED, ACTIVE_WORDS)).fetchall()
+        """, (CORRECT_REQUIRED, words_count)).fetchall()
     else:
         words = cursor.execute("""
-            SELECT verb, tense, pronoun FROM conjugations
+            SELECT verb, tense, pronoun, conjugation, translation_ru, correct_count FROM conjugations
             WHERE correct_count < ? AND tense = ?
-            ORDER BY last_update ,  RANDOM()
+            ORDER BY  RANDOM()
             LIMIT ?
-        """, (CORRECT_REQUIRED, tense, ACTIVE_WORDS)).fetchall()
+        """, (CORRECT_REQUIRED, tense, words_count)).fetchall()
     conn.close()
     return words
+
+
+
+def get_random_word_idx(active_words, showed_words):
+    verbIdx = random.randint(0, len(active_words) -1 );
+    verb, tense, pronoun, correct_conjugation, translation_ru, correct_count  = active_words[verbIdx]
+    if f"{verb}-{tense}-{pronoun}" in showed_words:
+        return get_random_word_idx(active_words, showed_words)
+    else: 
+        return verbIdx;
+
+def word_showed(showed_words, word_key):
+    if len(showed_words) >= DONT_REPEAT_LEN:
+        showed_words.pop(0)
+    showed_words.append(word_key)
+
+    
+
 
 # Verb Learning Function
 def verb_quiz(tenseTitle):
@@ -140,35 +154,52 @@ def verb_quiz(tenseTitle):
         print("No verbs available to learn. Please import first.")
         return
     
-    while True:
-        verb, tense, pronoun = random.choice(active_words)
-        result = cursor.execute("SELECT conjugation, translation_ru, correct_count FROM conjugations WHERE verb=? AND tense=? AND pronoun=?", (verb, tense, pronoun)).fetchone()
-        
-        if not result:
-            continue
-        
-        correct_conjugation, translation_ru, correct_count = result
+    showed_words = []
+
+    while len(active_words) > 0:
+
+        verbIdx = get_random_word_idx(active_words, showed_words)
+        verb, tense, pronoun, correct_conjugation, translation_ru, correct_count  = active_words[verbIdx]
+
+
+
         helpFactor = 0;
         print(f"{Fore.CYAN}{translation_ru}{Style.RESET_ALL} / {Fore.MAGENTA}{tense}{Style.RESET_ALL}")
         user_input = input(f"Traduisez : {pronoun} ______ Votre réponse : ").strip()
-        print(f"Progress: {correct_count}/{CORRECT_REQUIRED}")
+        
 
-        if user_input ==  "/mh":
-            helpFactor = -0.5
-            show_help(correct_conjugation)
+        if user_input ==  "":
+            show_help()
             user_input = input("Votre responce est >> ")
-        if user_input == "/q":
+        if user_input ==  "/am" or user_input == "!am":
+            helpFactor = -0.5
+            show_word_hint(correct_conjugation)
+            user_input = input("Votre responce est >> ")
+        if user_input == "/q" or user_input == "!q":
             quit()    
 
+        successScore = 0;
 
         if user_input.lower() == correct_conjugation.lower():
-            print("✅ Bien!")
-            update_progress(verb, tense, pronoun, 1 + helpFactor)
+            successScore = 1 + helpFactor;
         else:
-            print("Erreur ! Votre réponse : ", highlight_mistakes(user_input, correct_conjugation))
-            print(Fore.YELLOW + f"La bonne réponse est : {Fore.LIGHTGREEN_EX}{correct_conjugation.upper()}" + Style.RESET_ALL)
-            update_progress(verb, tense, pronoun, -1)
+            successScore = - 1
 
+        newCorrectCount = update_progress(verb, tense, pronoun, successScore)
+
+        if newCorrectCount >= CORRECT_REQUIRED:
+            del active_words[verbIdx]
+            active_words = active_words + get_active_words(tenseTitle, 1)
+            print(f"{Fore.LIGHTGREEN_EX} APPRIS! {Style.RESET_ALL}")
+        else:
+            active_words[verbIdx][-1] = newCorrectCount
+            word_showed(showed_words, f"{verb}-{tense}-{pronoun}")
+            if successScore < 0:
+                print("Erreur ! Votre réponse : ", highlight_mistakes(user_input, correct_conjugation))
+                print(f"{Fore.YELLOW}La bonne réponse est : {Fore.LIGHTGREEN_EX}{correct_conjugation.upper()}{Style.RESET_ALL}{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.LIGHTGREEN_EX} Beien! {Style.RESET_ALL}{Fore.LIGHTBLACK_EX}{newCorrectCount}/{CORRECT_REQUIRED}{Style.RESET_ALL}")
+                
 # Verb Menu
 def menu():
     """Menu for selecting verb learning mode."""

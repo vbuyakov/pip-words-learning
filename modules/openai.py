@@ -1,12 +1,33 @@
 import json
 import openai
+import os
 
-# Load OpenAI API key from config
-with open("config.json") as f:
-    config = json.load(f)
+config = []
+
+def setup_openai():
+    
+    # Check if config file exists
+    config_path = "config.json"
+    if not os.path.exists(config_path):
+        return False
+
+    # Load OpenAI API key from config
+    with open(config_path) as f:
+        config = json.load(f)
+    
+    if "openai_api_key" not in config or not config["openai_api_key"]:
+        return False
+    
     openai.api_key = config["openai_api_key"]
+    return True
+
+    
 
 def fetch_conjugation(verb, tense):
+    if setup_openai()  == False:
+        print("You can't use this feature. You need to setup OpenAI key in config.json to process your file")
+        return
+        
     """Queries OpenAI API to fetch conjugations and Russian translations for given verb and tense."""
     client = openai.OpenAI(api_key=config["openai_api_key"])
     response = client.chat.completions.create(
